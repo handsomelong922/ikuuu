@@ -7,33 +7,51 @@ on:
   pull_request:
     branches: [ master ]
   schedule:
-    - cron:   20 18 * * *
+    - cron: "20 18 * * *"
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v2
+      - uses: actions/checkout@v2
 
-    - name: Install Python
-      run: |
-        sudo apt update && \
-        sudo apt install python3
-      
-    - name: requirements
-      run: |
-        pip3 install -r requirements.txt
-        
-    - name: Checkin
-      run: |
-        python3 main.py 
-      env: 
-        EMAIL: ${{ secrets.EMAIL }}
-        PASSWORD: ${{ secrets.PASSWORD }}
-        DOMAIN: ${{ secrets.DOMAIN }}
-        QYWX_CORPID: ${{ secrets.QYWX_CORPID }}
-        QYWX_AGENTID: ${{ secrets.QYWX_AGENTID }}
-        QYWX_CORPSECRET: ${{ secrets.QYWX_CORPSECRET }}
-        QYWX_TOUSER: ${{ secrets.QYWX_TOUSER }}
-        QYWX_MEDIA_ID: ${{ secrets.QYWX_MEDIA_ID }}
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install requirements
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # 可选：安全自检（不泄露 token，只看是否注入成功）
+      - name: Debug env (safe)
+        run: |
+          python - << 'PY'
+          import os
+          v = os.getenv("PUSHPLUS_TOKEN", "")
+          print("PUSHPLUS_TOKEN exists:", "PUSHPLUS_TOKEN" in os.environ)
+          print("PUSHPLUS_TOKEN length:", len(v))
+          PY
+        env:
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+
+      - name: Checkin
+        run: |
+          python main.py
+        env:
+          EMAIL: ${{ secrets.EMAIL }}
+          PASSWORD: ${{ secrets.PASSWORD }}
+          DOMAIN: ${{ secrets.DOMAIN }}
+
+          # PushPlus（必填）
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+
+          # PushPlus（可选：二选一；都不填=发给自己）
+          PUSHPLUS_TOPIC: ${{ secrets.PUSHPLUS_TOPIC }}
+          PUSHPLUS_TO: ${{ secrets.PUSHPLUS_TO }}
+
+          # PushPlus（可选）
+          PUSHPLUS_TEMPLATE: markdown
