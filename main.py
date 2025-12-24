@@ -3,68 +3,60 @@ import json
 import requests
 import os
 
-#账户
+# 账户
 EMAIL = os.environ["EMAIL"]
 PASSWORD = os.environ["PASSWORD"]
 DOMAIN = os.environ["DOMAIN"]
 
+# PushPlus 配置（至少需要 PUSHPLUS_TOKEN）
+PUSHPLUS_TOKEN = os.environ["PUSHPLUS_TOKEN"]
+PUSHPLUS_TOPIC = os.getenv("PUSHPLUS_TOPIC", "").strip()       # 可选：群组编码 topic
+PUSHPLUS_TO = os.getenv("PUSHPLUS_TO", "").strip()             # 可选：好友令牌 to（与 topic 二选一）
+PUSHPLUS_TEMPLATE = os.getenv("PUSHPLUS_TEMPLATE", "markdown") # 可选：html / markdown / json 等
 
-# 企业微信配置
-QYWX_CORPID = os.environ["QYWX_CORPID"]
-QYWX_AGENTID = os.environ["QYWX_AGENTID"]
-QYWX_CORPSECRET = os.environ["QYWX_CORPSECRET"]
-QYWX_TOUSER = os.environ["QYWX_TOUSER"]
-QYWX_MEDIA_ID = os.environ["QYWX_MEDIA_ID"]
 
 class SSPANEL:
     name = "SSPANEL"
 
     def __init__(self, check_item):
         self.check_item = check_item
-        self.qywx_corpid = QYWX_CORPID
-        self.qywx_agentid = QYWX_AGENTID
-        self.qywx_corpsecret = QYWX_CORPSECRET
-        self.qywx_touser = QYWX_TOUSER
-        self.qywx_media_id = QYWX_MEDIA_ID
+        self.pushplus_token = PUSHPLUS_TOKEN
+        self.pushplus_topic = PUSHPLUS_TOPIC
+        self.pushplus_to = PUSHPLUS_TO
+        self.pushplus_template = PUSHPLUS_TEMPLATE
 
-    def message2qywxapp(self, qywx_corpid, qywx_agentid, qywx_corpsecret, qywx_touser, qywx_media_id, content):
-        print("企业微信应用消息推送开始")
-        res = requests.get(
-            f"https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid={qywx_corpid}&corpsecret={qywx_corpsecret}"
-        )
-        token = res.json().get("access_token", False)
-        if qywx_media_id:
-            data = {
-                "touser": qywx_touser,
-                "msgtype": "mpnews",
-                "agentid": int(qywx_agentid),
-                "mpnews": {
-                    "articles": [
-                        {
-                            "title": "ikuuu 签到通知",
-                            "thumb_media_id": qywx_media_id,
-                            "content_source_url": "https://ikuuu.co/",
-                            "content": content.replace("\n", "<br>"),
-                            "digest": content,
-                        }
-                    ]
-                },
-            }
-        else:
-            data = {
-                "touser": qywx_touser,
-                "agentid": int(qywx_agentid),
-                "msgtype": "textcard",
-                "textcard": {
-                    "title": "ikuuu 签到通知",
-                    "description": content,
-                    "url": "https://ikuuu.co/",
-                },
-            }
-        result = requests.post(url=f"https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token={token}",
-                               data=json.dumps(data))
-        # print(result)
-        return
+    def message2pushplus(self, title: str, content: str):
+        print("PushPlus 消息推送开始")
+
+        # PushPlus 参数：token 必填；content 必填；topic/to 可选（不建议同时填）0
+        data = {
+            "token": self.pushplus_token,
+            "title": title,
+            "content": content,
+            "template": self.pushplus_template,
+        }
+
+        # 优先使用 to（好友消息）；否则使用 topic（群组）；都不填则发给自己 1
+        if self.pushplus_to:
+            data["to"] = self.pushplus_to
+        elif self.pushplus_topic:
+            data["topic"] = self.pushplus_topic
+
+        try:
+            resp = requests.post(
+                "https://www.pushplus.plus/send",
+                data=json.dumps(data),
+                headers={"Content-Type": "application/json"},
+                timeout=15,
+            )
+            # pushplus 返回 code=200 代表服务端收到请求；不等于最终发送必达（文档对 batchSend 明确说明，send 亦同理建议按返回信息判断）2
+            result = resp.json()
+            if result.get("code") != 200:
+                print(f"PushPlus 推送失败: {result}")
+            else:
+                print("PushPlus 推送请求已提交")
+        except Exception as e:
+            print(f"PushPlus 推送异常: {e}")
 
     def sign(self, email, password, url):
         email = email.replace("@", "%40")
@@ -76,8 +68,7 @@ class SSPANEL:
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36",
                 "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
             }
-            post_data = "email=" + email + "&passwd=" + password + "&code="
-            post_data = post_data.encode()
+            post_data = ("email=" + email + "&passwd=" + password + "&code=").encode()
             session.post(login_url, post_data, headers=headers, verify=False)
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36",
@@ -85,7 +76,7 @@ class SSPANEL:
             }
             response = session.post(url + "/user/checkin", headers=headers, verify=False)
             msg = response.json().get("msg")
-        except Exception as e:
+        except Exception:
             msg = "签到失败"
         return msg
 
@@ -93,23 +84,19 @@ class SSPANEL:
         email = self.check_item.get("email")
         password = self.check_item.get("password")
         url = self.check_item.get("url")
-        qywx_corpid = self.qywx_corpid
-        qywx_agentid = self.qywx_agentid
-        qywx_corpsecret = self.qywx_corpsecret
-        qywx_touser = self.qywx_touser
-        qywx_media_id = self.qywx_media_id
+
         sign_msg = self.sign(email=email, password=password, url=url)
-        msg = [
+
+        msg_lines = [
             {"name": "帐号信息", "value": email},
             {"name": "签到信息", "value": f"{sign_msg}"},
         ]
-        msg = "\n".join([f"{one.get('name')}: {one.get('value')}" for one in msg])
-        self.message2qywxapp(qywx_corpid=qywx_corpid, qywx_agentid=qywx_agentid, qywx_corpsecret=qywx_corpsecret,
-                             qywx_touser=qywx_touser, qywx_media_id=qywx_media_id, content=msg)
+        msg = "\n".join([f"{one.get('name')}: {one.get('value')}" for one in msg_lines])
+
+        self.message2pushplus(title="ikuuu 签到通知", content=msg)
         return msg
 
 
-
 if __name__ == "__main__":
-    _check_item = {'email': EMAIL, 'password': PASSWORD, 'url': DOMAIN}
+    _check_item = {"email": EMAIL, "password": PASSWORD, "url": DOMAIN}
     SSPANEL(check_item=_check_item).main()
